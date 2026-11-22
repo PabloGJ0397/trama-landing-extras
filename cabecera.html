@@ -59,6 +59,8 @@ const CLAROS = [COLORES.papel, '#F6B5CF', '#BFA8E8', '#FFE9A8', '#9ED8EE', '#F8C
 
 // Respeta a quien tiene desactivadas las animaciones en su sistema
 const SIN_ANIMACION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+let animar = !SIN_ANIMACION;   // se pone a false al redimensionar (se redibuja sin repetir la animación)
+let visible;                   // rectángulo de la escena que se ve realmente en pantalla (se calcula al montar)
 
 /* -------------------------------------------------------------------------
    Datos de la composición.
@@ -131,12 +133,16 @@ function desplazada(p, f) {
   }
   return out;
 }
-// Prolonga una curva en línea recta hacia fuera de la escena (260 unidades), para que
-// el hilo entre desde el borde de la pantalla sea cual sea su tamaño
+// Prolonga una curva en línea recta hacia atrás justo hasta salir del área visible,
+// para que el hilo entre siempre desde el borde de la pantalla, sea cual sea su tamaño
 function conEntrada(p) {
-  const dx = p[0] - p[2], dy = p[1] - p[3], l = Math.hypot(dx, dy);
-  const x0 = p[0] + dx / l * 260, y0 = p[1] + dy / l * 260;
-  return { d: `M${x0.toFixed(1)},${y0.toFixed(1)} L${p[0]},${p[1]} C${p[2]},${p[3]} ${p[4]},${p[5]} ${p[6]},${p[7]}`, extra: 260 };
+  const dx = p[0] - p[2], dy = p[1] - p[3], l = Math.hypot(dx, dy), ux = dx / l, uy = dy / l;
+  // Distancia hasta cruzar el borde visible en x y en y (la menor es la que manda)
+  const tx = ux > 0 ? (visible.x2 - p[0]) / ux : ux < 0 ? (visible.x1 - p[0]) / ux : Infinity;
+  const ty = uy > 0 ? (visible.y2 - p[1]) / uy : uy < 0 ? (visible.y1 - p[1]) / uy : Infinity;
+  const extra = Math.max(0, Math.min(tx, ty)) + 15;
+  const x0 = p[0] + ux * extra, y0 = p[1] + uy * extra;
+  return { d: `M${x0.toFixed(1)},${y0.toFixed(1)} L${p[0]},${p[1]} C${p[2]},${p[3]} ${p[4]},${p[5]} ${p[6]},${p[7]}`, extra };
 }
 // Hilo con puntadas (línea discontinua gruesa)
 function puntada(d, color, padre) {
@@ -147,10 +153,11 @@ function puntada(d, color, padre) {
 // «Borda» un grupo: una máscara con un trazo que avanza a lo largo de la curva
 function bordar(grupo, d, ancho, retardo, duracion) {
   const id = 'm' + Math.random().toString(36).slice(2, 8) + SUF;
-  const mascara = el('mask', { id, maskUnits:'userSpaceOnUse', x:-700, y:-700, width:2080, height:1900 }, defs);
+  const mascara = el('mask', { id, maskUnits:'userSpaceOnUse', x:visible.x1 - 100, y:visible.y1 - 100,
+                               width:visible.x2 - visible.x1 + 200, height:visible.y2 - visible.y1 + 200 }, defs);
   const guia = el('path', { d, fill:'none', stroke:'#fff', 'stroke-width':ancho, 'stroke-linecap':'round' }, mascara);
   grupo.setAttribute('mask', `url(#${id})`);
-  if (SIN_ANIMACION) return;
+  if (!animar) return;
   const L = guia.getTotalLength() + 2;
   guia.setAttribute('stroke-dasharray', L);
   guia.style.strokeDashoffset = L;
@@ -159,7 +166,7 @@ function bordar(grupo, d, ancho, retardo, duracion) {
 }
 // Aparición con «salto» (para zurcidos y botones)
 function aparecer(elemento, retardo, desde = .2) {
-  if (SIN_ANIMACION) return;
+  if (!animar) return;
   elemento.style.transformBox = 'fill-box';
   elemento.style.transformOrigin = 'center';
   elemento.animate([{ opacity: 0, transform: `scale(${desde})` },
@@ -302,7 +309,7 @@ function logo(padre, retardo) {
                              'font-family':"'Dela Gothic One', sans-serif", textLength:104, lengthAdjust:'spacingAndGlyphs' }, etiqueta);
   texto.textContent = 'TRAMA';
 
-  if (!SIN_ANIMACION) {
+  if (animar) {
     // La cinta se despliega desde el centro, luego salen los flecos y por último se cose la etiqueta
     cinta.style.transformBox = 'fill-box'; cinta.style.transformOrigin = 'center';
     cinta.animate([{ transform:'scaleX(0)' }, { transform:'scaleX(1)' }],
@@ -322,11 +329,18 @@ let capas = [];   // [{ elemento, claves:Set }] para el resaltado al pulsar
 
 function registrar(elemento, claves) { elemento.classList.add('capa'); capas.push({ elemento, claves: new Set(claves) }); }
 
-function montar() {
+function montar(conAnimacion = true) {
+  animar = conAnimacion && !SIN_ANIMACION;
+  // Área de la escena (en unidades del viewBox 680×500) que cabe en el recuadro actual
+  const r = lienzo.getBoundingClientRect();
+  const esc = Math.min(r.width / 680, r.height / 500) || 1;
+  const vw = r.width / esc, vh = r.height / esc;
+  visible = { x1: 340 - vw/2, x2: 340 + vw/2, y1: 250 - vh/2, y2: 250 + vh/2 };
+
   lienzo.innerHTML = '';
   capas = [];
   defs = el('defs', {});
-  el('rect', { x:-400, y:-400, width:1480, height:1300, fill:C.papel });   // fondo (cubre aunque se recorte)
+  el('rect', { x:visible.x1, y:visible.y1, width:vw, height:vh, fill:C.papel });   // fondo
 
   const capaHilos = el('g', {}), capaAlianzas = el('g', {}), capaNodos = el('g', {}), capaBotones = el('g', {}), capaLogo = el('g', {});
   const finHilo = {};   // momento en que termina de bordarse cada colectivo
@@ -389,7 +403,11 @@ function quitarResaltado() { capas.forEach(c => c.elemento.style.opacity = 1); }
 
 // Pulsar en el fondo quita el resaltado; el botón vuelve a tejerlo todo
 lienzo.addEventListener('click', quitarResaltado);
-document.getElementById('replay').addEventListener('click', montar);
+document.getElementById('replay').addEventListener('click', () => montar(true));
+// Si cambia el tamaño del recuadro, se redibuja (sin repetir la animación) para que los hilos
+// sigan naciendo en el borde
+let temporizador;
+window.addEventListener('resize', () => { clearTimeout(temporizador); temporizador = setTimeout(() => montar(false), 200); });
 
 montar();
 </script>
