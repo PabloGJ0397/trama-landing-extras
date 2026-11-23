@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Sin esto, en un Notion oscuro el recuadro se pinta con fondo blanco opaco; así queda transparente en claro y en oscuro -->
+<meta name="color-scheme" content="light dark">
+<title>Trama · franja de hilos (5 hilos, perpetua)</title>
+<style>
+  /* Fondo crema «papel» por defecto (igual que cabecera.html). Con ?fondo=transparente se ve el de la página. */
+  html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+  svg {
+    display: block; width: 100%; height: 100%;
+    /* Desvanece los extremos para que, aunque Notion separe los bloques, no se note un corte seco */
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 6%, #000 94%, transparent 100%);
+            mask-image: linear-gradient(to bottom, transparent 0, #000 6%, #000 94%, transparent 100%);
+  }
+</style>
+</head>
+<body>
+<svg id="lienzo" aria-hidden="true"></svg>
+
+<script>
+/* =========================================================================
+   TRAMA · franja vertical de hilos trenzados que se bordan y se deshacen.
+
+   Cada hilo es una «serpiente»: su cabeza va bordando el recorrido y su cola
+   lo va borrando justo detrás, en bucle infinito (como una serpiente que
+   persigue su propia cola). Los hilos no van a la vez: cada uno sale
+   SEPARACIÓN segundos después del anterior, así la trenza se crea y
+   desaparece sin parar.
+
+   Parámetros por URL (todos opcionales), p. ej.:
+     trenza.html?colores=morado,naranja,celeste,fucsia&dur=24&seg=5&fondo=papel
+   ========================================================================= */
+
+/* ---------- 1. CONFIGURACIÓN ---------- */
+// PALETA: copia exacta del bloque COLORES de cabecera.html. Para cambiar la paleta de Trama, cambiar
+// los mismos valores en los dos archivos (los nombres de las claves no se tocan).
+const COLORES = {
+  morado:  '#7A3FC4', verde:   '#2E9E5B', naranja: '#F28C28', rojo:    '#E63946',
+  azul:    '#2B59C3', celeste: '#4FC3E8', fucsia:  '#E0218A', lima:    '#8BC53F',
+  mostaza: '#F5C518', turquesa:'#12A89D',
+  tinta:   '#1A1A1A', papel:   '#F5F0E6', boton:   '#EDE4D0', fondoTejido: '#241E2A'
+};
+// Qué colores lleva cada hilo, por nombre y EN ORDEN DE DESFASE (el hilo k va desfasado k/N de periodo).
+// Con número par de hilos, el k y el k + N/2 son pareja en oposición (cumbre ↔ valle).
+const POR_DEFECTO = ['azul', 'mostaza', 'morado', 'rojo', 'verde'];
+
+const params  = new URLSearchParams(location.search);
+const nombres = (params.get('colores') || POR_DEFECTO.join(',')).split(',')
+  .map(s => s.trim()).filter(n => COLORES[n]);
+const PALETA  = (nombres.length ? nombres : POR_DEFECTO).map(n => COLORES[n]);
+// Segundo juego de hilos: gira al revés (levógiro) pero circula en el mismo sentido que el primero, con otros colores
+const POR_DEFECTO_B = ['mostaza','verde'];   // segundo par, con otros dos colores
+const nombresB = (params.get('coloresb') || POR_DEFECTO_B.join(',')).split(',').map(x => x.trim()).filter(x => COLORES[x]);
+const PALETA_B = (nombresB.length ? nombresB : POR_DEFECTO_B).map(x => COLORES[x]);
+const CON_B  = false;                                          // en esta versión todos los hilos van en una sola lista (ver POR_DEFECTO)
+const AMP_B  = parseFloat(params.get('ampb')) || 1;           // anchura del segundo juego respecto al primero (1 = igual)
+// Movimiento perpetuo: cada hilo es una serpiente larga que persigue su propia cola. Al cargar, los hilos
+// entran uno tras otro y se trenza la franja entera; a partir de ahí nunca se deshace: cada serpiente
+// deja solo un hueco de UN periodo entre su cabeza y su cola (la cabeza sale por abajo mientras su cola
+// sigue entrando por arriba) y ese hueco va dando vueltas, escalonado respecto al de los demás hilos.
+const VELOCIDAD  = parseFloat(params.get('vel')) || 40;                 // px/s a los que avanza cada serpiente
+const SEG_FIJA   = params.get('seg') !== null ? parseFloat(params.get('seg')) * 1000 : null;   // ?seg= : ms entre un hilo y el siguiente; si no, se reparten por igual
+const ADELANTO   = (params.get('adelanto') !== null ? parseFloat(params.get('adelanto')) : 12) * 1000; // la animación arranca ya este tiempo avanzada
+const FONDO = params.get('fondo');   // por defecto: crema «papel», igual que la cabecera
+const PAPEL = FONDO === null || FONDO === 'papel';
+if (PAPEL) document.body.style.background = COLORES.papel;
+// ?fondo=transparente deja ver el fondo de la página; ?fondo=191919 (hex sin #) pinta ese color
+if (FONDO && /^[0-9a-f]{3,8}$/i.test(FONDO)) document.body.style.background = '#' + FONDO;
+// El «halo» (contorno oscuro) está desactivado; con ?halo=1 vuelve. Color del «halo» que separa un hilo del que pasa por debajo (da el efecto por encima / por debajo)
+const COMPLETO = params.get('completo') === '1';   // hilos enteros, sin serpiente (para revisar la forma)
+const MARCAS   = params.get('marcas') === '1';     // puntos en cada cumbre y cada valle (para revisar el desfase)
+const CON_HALO = params.get('halo') === '1';
+const HALO = PAPEL ? COLORES.papel : COLORES.tinta;
+
+const ANCHO_MAX = 110;   // anchura máxima de la trenza (px)
+const VUELTA    = 120;   // distancia vertical entre cruces (px)
+const GROSOR    = 5;     // grosor del hilo (px)
+
+/* ---------- 2. UTILIDADES ---------- */
+const SVGNS = 'http://www.w3.org/2000/svg';
+const lienzo = document.getElementById('lienzo');
+const el = (tag, attrs, padre) => {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (padre) padre.appendChild(e);
+  return e;
+};
+const dPuntos = pts => 'M' + pts.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' L');
+
+/* ---------- 3. MONTAJE ---------- */
+const SIN_ANIMACION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const FIJO = params.get('t');          // ?t=10 congela la animación en el segundo 10 (para pruebas)
+let animaciones = [];
+
+function montar() {
+  animaciones.forEach(a => a.cancel()); animaciones = [];
+  lienzo.innerHTML = '';
+  const W = lienzo.clientWidth, H = lienzo.clientHeight;
+  if (!W || !H) return;
+  lienzo.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  const defs = el('defs', {}, lienzo);
+
+  const cx = W / 2;
+  const ampA = Math.min(W, ANCHO_MAX) / 2 - GROSOR * 1.6;
+  const y0 = -30, y1 = H + 30;           // el recorrido sobrepasa los bordes: las serpientes entran y salen fuera de vista
+
+  // Cada juego: colores, anchura, giro (+1 dextrógiro / -1 levógiro) y sentido de circulación (+1 baja / -1 sube)
+  const JUEGOS = [{ paleta: PALETA, amp: ampA, giro: 1, sentido: 1 }];
+  if (CON_B) JUEGOS.push({ paleta: PALETA_B, amp: ampA * AMP_B, giro: 1, sentido: 1 });
+
+  // Se intercalan los hilos de los dos juegos (A1, B1, A2, B2...) y se reparte el desfase por igual:
+  // desfase del hilo k = periodo × k / N. Así los hilos opuestos (k y k + N/2) van siempre en oposición:
+  // cuando uno hace «montaña» el otro hace «valle».
+  const lista = [];
+  const mayor = Math.max(...JUEGOS.map(j => j.paleta.length));
+  for (let i = 0; i < mayor; i++) JUEGOS.forEach(j => { if (i < j.paleta.length) lista.push({ j, color: j.paleta[i] }); });
+  const N = lista.length;
+
+  // 3.1 Cada hilo: puntos a lo largo de la franja, tramos «por detrás» y «por delante»
+  const hilos = [];
+  lista.forEach(({ j, color }, k) => {
+    const fase = 2 * Math.PI * k / N;
+    let pts = [], delante = [];
+    for (let y = y0; y <= y1; y += 4) {
+      const ang = 2 * Math.PI * y / VUELTA + fase;
+      pts.push([cx + j.amp * Math.sin(ang), y]);
+      delante.push(j.giro * Math.cos(ang) >= 0);   // el giro invertido cambia quién pasa por encima
+    }
+    // Sentido contrario: el recorrido (y su serpiente) empieza por abajo
+    if (j.sentido < 0) { pts.reverse(); delante.reverse(); }
+    const tramos = []; let s = 0;
+    for (let q = 1; q < pts.length; q++) if (delante[q] !== delante[q - 1]) { tramos.push([s, q, delante[q - 1]]); s = q; }
+    tramos.push([s, pts.length - 1, delante[pts.length - 1]]);
+    hilos.push({ color, pts, tramos, id: 'm' + k, orden: k, n: N });
+  });
+
+  // 3.2 Máscara de cada hilo: un trazo (la serpiente) que recorre el hilo en bucle
+  hilos.forEach(h => {
+    const mascara = el('mask', { id:h.id, maskUnits:'userSpaceOnUse', x:-50, y:y0 - 50, width:W + 100, height:y1 - y0 + 100 }, defs);
+    const guia = el('path', { d:dPuntos(h.pts), fill:'none', stroke:'#fff', 'stroke-width':GROSOR * 3, 'stroke-linecap':'round' }, mascara);
+    const L = guia.getTotalLength();
+    const E = y1 - y0;                                   // largo del recorrido en vertical
+    const G = L * VUELTA / E;                            // hueco entre cabeza y cola: un periodo de la onda (medido sobre la curva)
+    const S = L - G;                                     // largo de la serpiente
+    const DUR = E / VELOCIDAD * 1000;                    // ms que tarda la serpiente en dar una vuelta entera al recorrido
+    const SEP = SEG_FIJA !== null ? SEG_FIJA : DUR / h.n;   // los huecos de los hilos quedan repartidos por igual
+    h.mascara = `url(#${h.id})`;
+    if (COMPLETO || (SIN_ANIMACION && FIJO === null)) { guia.setAttribute('stroke-dasharray', `${S} ${G}`); guia.setAttribute('stroke-dashoffset', G / 2); return; } // sin movimiento: hilo casi entero
+    // Fase 1 (entrada): la cabeza avanza desde el inicio del recorrido y la serpiente va apareciendo
+    guia.setAttribute('stroke-dasharray', `${S} ${L}`);
+    guia.setAttribute('stroke-dashoffset', S);
+    const entrada = guia.animate([{ strokeDashoffset: S }, { strokeDashoffset: S - L }],
+                                 { duration: DUR, delay: FIJO !== null ? 0 : h.orden * SEP - ADELANTO, easing: 'linear', fill: 'both' });
+    // Fase 2 (perpetua): cuando la cabeza llega al final, el patrón pasa a repetirse cada L, así que la cabeza
+    // reaparece arriba pegada a la cola y la serpiente da vueltas sin parar (el estado visual es idéntico al cambiar)
+    const vuelta = () => {
+      guia.setAttribute('stroke-dasharray', `${S} ${G}`);
+      return guia.animate([{ strokeDashoffset: S - L }, { strokeDashoffset: S - 2 * L }],
+                          { duration: DUR, iterations: Infinity, easing: 'linear' });
+    };
+    if (FIJO !== null) {                                   // ?t=segundos: congela el fotograma (para pruebas)
+      const tk = parseFloat(FIJO) * 1000 - h.orden * SEP;
+      entrada.pause();
+      if (tk >= DUR) { entrada.cancel(); const a2 = vuelta(); a2.pause(); a2.currentTime = (tk - DUR) % DUR; animaciones.push(a2); return; }
+      entrada.currentTime = Math.max(0, tk); animaciones.push(entrada); return;
+    }
+    // La vuelta perpetua arranca en el instante exacto en que termina la entrada (así se conserva el desfase entre hilos).
+    // El instante se lee al terminar, cuando la animación ya tiene startTime asignado.
+    entrada.finished.then(() => {
+      const fin = entrada.startTime + (h.orden * SEP - ADELANTO) + DUR;
+      entrada.cancel();
+      const a2 = vuelta(); a2.startTime = fin; animaciones.push(a2);
+    }).catch(() => {});
+    animaciones.push(entrada);
+  });
+
+  // 3.3 Dibujo: primero los tramos que pasan por detrás, luego los de delante (con halo) → cruce real
+  [false, true].forEach(arriba => hilos.forEach(h => h.tramos.forEach(r => {
+    if (r[2] !== arriba) return;
+    const d = dPuntos(h.pts.slice(r[0], r[1] + 1));
+    if (arriba && CON_HALO) el('path', { d, fill:'none', stroke:HALO, 'stroke-width':GROSOR + 5, 'stroke-linecap':'round', mask:h.mascara }, lienzo);
+    el('path', { d, fill:'none', stroke:h.color, 'stroke-width':GROSOR, 'stroke-linecap':'round', mask:h.mascara }, lienzo);
+  })));
+
+  // Revisión visual: punto en cada cumbre (x máximo, relleno) y cada valle (x mínimo, hueco) de cada hilo
+  if (MARCAS) hilos.forEach(h => h.pts.forEach((q, m) => {
+    if (m === 0 || m === h.pts.length - 1) return;
+    const a = h.pts[m - 1][0], b = h.pts[m + 1][0];
+    const cumbre = q[0] > a && q[0] >= b, valle = q[0] < a && q[0] <= b;
+    if (cumbre || valle) el('circle', { cx:q[0], cy:q[1], r:4, fill: cumbre ? h.color : '#fff', stroke:h.color, 'stroke-width':2 }, lienzo);
+  }));
+}
+
+montar();
+let temporizador;
+window.addEventListener('resize', () => { clearTimeout(temporizador); temporizador = setTimeout(montar, 200); });
+</script>
+</body>
+</html>
