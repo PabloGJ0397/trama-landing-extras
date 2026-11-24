@@ -50,12 +50,12 @@
   .ev.nuevo { animation: coser .9s ease-out both; }
   .ev.choque { animation: pulso .9s ease-in-out infinite; }
   .prop { pointer-events: none; z-index: 2; }
-  .prop.libre  { outline: 2px dashed #E0218A; outline-offset: -2px; background: rgba(224, 33, 138, .12); }
-  .prop.malo   { outline: 2px dashed #E63946; outline-offset: -2px;
-                 background: repeating-linear-gradient(45deg, rgba(230,57,70,.22) 0 6px, transparent 6px 12px); }
+  .prop.libre  { outline: 2px dashed #C14C8A; outline-offset: -2px; background: rgba(193, 76, 138, .12); }
+  .prop.malo   { outline: 2px dashed #D44C47; outline-offset: -2px;
+                 background: repeating-linear-gradient(45deg, rgba(212, 76, 71,.22) 0 6px, transparent 6px 12px); }
   .prop b { display: block; }
   @keyframes coser { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
-  @keyframes pulso { 50% { box-shadow: 0 0 0 3px rgba(230, 57, 70, .55); } }
+  @keyframes pulso { 50% { box-shadow: 0 0 0 3px rgba(212, 76, 71, .55); } }
   @media (prefers-reduced-motion: reduce) { .ev.nuevo, .ev.choque { animation: none; } }
 
 
@@ -111,12 +111,12 @@
    Parámetros de prueba por URL (opcionales): ?p=0,18 propone lunes a las 18:00; &pub=1 lo publica.
    ========================================================================= */
 
-// PALETA: copia exacta del bloque COLORES de cabecera.html y del resto de archivos de Trama.
-// Para cambiar la paleta hay que cambiar los mismos valores en todos los archivos.
+// PALETA: colores de texto de Notion (modo claro), para que casen con los bloques de color de la página.
+// Mismo bloque en franjas, puntadas y demo: si se cambia, cambiarlo en todos (los nombres de las claves no se tocan).
 const COLORES = {
-  morado:  '#7A3FC4', verde:   '#2E9E5B', naranja: '#F28C28', rojo:    '#E63946',
-  azul:    '#2B59C3', celeste: '#4FC3E8', fucsia:  '#E0218A', lima:    '#8BC53F',
-  mostaza: '#F5C518', turquesa:'#12A89D',
+  morado:  '#9065B0', verde:   '#448361', naranja: '#D9730D', rojo:    '#D44C47',
+  azul:    '#337EA9', celeste: '#5BA3C7', fucsia:  '#C14C8A', lima:    '#7F9F3F',
+  mostaza: '#CB912F', turquesa:'#3A9A8A',
   tinta:   '#1A1A1A', papel:   '#F5F0E6', boton:   '#EDE4D0', fondoTejido: '#241E2A'
 };
 
