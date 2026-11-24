@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Sin esto, en un Notion oscuro el recuadro se pinta con fondo blanco opaco; así queda transparente en claro y en oscuro -->
+<meta name="color-scheme" content="light dark">
+<title>Trama · línea de puntadas</title>
+<style>
+  /* Fondo transparente por defecto: se ve el color de la página que lo contiene. Con ?fondo=papel se pinta el crema. */
+  html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+  svg {
+    display: block; width: 100%; height: 100%;
+    /* Desvanece los dos extremos para que la línea parezca salir del margen y no se note un corte seco */
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 8%, #000 92%, transparent 100%);
+            mask-image: linear-gradient(to right, transparent 0, #000 8%, #000 92%, transparent 100%);
+  }
+</style>
+</head>
+<body>
+<svg id="lienzo" aria-hidden="true"></svg>
+
+<script>
+/* =========================================================================
+   TRAMA · línea horizontal de puntadas que se cose sola.
+
+   Cada puntada es un trazo corto y de un color. Se van cosiendo una detrás de
+   otra (de izquierda a derecha) y, un poco por detrás, se van descosiendo:
+   un «hueco» recorre la línea sin parar y la línea nunca queda vacía
+   (misma idea que la franja vertical de hilos).
+
+   Parámetros por URL (todos opcionales), p. ej.:
+     puntadas.html?dir=izq&colores=morado,naranja,celeste&ritmo=120&fondo=papel
+   ========================================================================= */
+
+/* ---------- 1. CONFIGURACIÓN ---------- */
+// PALETA: copia exacta del bloque COLORES de cabecera.html y de las franjas verticales.
+// Para cambiar la paleta de Trama hay que cambiar los mismos valores en todos los archivos.
+const COLORES = {
+  morado:  '#7A3FC4', verde:   '#2E9E5B', naranja: '#F28C28', rojo:    '#E63946',
+  azul:    '#2B59C3', celeste: '#4FC3E8', fucsia:  '#E0218A', lima:    '#8BC53F',
+  mostaza: '#F5C518', turquesa:'#12A89D',
+  tinta:   '#1A1A1A', papel:   '#F5F0E6', boton:   '#EDE4D0', fondoTejido: '#241E2A'
+};
+// Colores de las puntadas, en orden, repetidos en bucle a lo largo de la línea
+const POR_DEFECTO = ['azul', 'mostaza', 'morado', 'rojo', 'verde', 'naranja'];
+
+const params  = new URLSearchParams(location.search);
+const nombres = (params.get('colores') || POR_DEFECTO.join(',')).split(',')
+  .map(s => s.trim()).filter(n => COLORES[n]);
+let PALETA = (nombres.length ? nombres : POR_DEFECTO).map(n => COLORES[n]);
+// ?color=rojo → todas las puntadas del mismo color (un solo hilo); admite un nombre de la paleta o un hex sin #
+const UNICO = params.get('color');
+if (UNICO) PALETA = [COLORES[UNICO] || (/^[0-9a-f]{3,8}$/i.test(UNICO) ? '#' + UNICO : COLORES.tinta)];
+
+const IZQUIERDA = params.get('dir') === 'izq';                 // ?dir=izq → se cose de derecha a izquierda
+const RITMO     = parseFloat(params.get('ritmo')) || 150;      // ms entre una puntada y la siguiente (más bajo = más rápido)
+const HUECO     = parseFloat(params.get('hueco')) || 3;        // nº de puntadas descosidas a la vez (el «hueco» que recorre la línea)
+const LARGO     = parseFloat(params.get('largo')) || 22;       // largo de cada puntada (px)
+const SEP       = parseFloat(params.get('sep')) || 12;         // espacio entre puntadas (px)
+const GROSOR    = parseFloat(params.get('grosor')) || 4;       // grosor del hilo (px)
+const ONDA      = params.get('onda') !== null ? parseFloat(params.get('onda')) : 2;   // vaivén vertical de las puntadas (px), efecto «hecho a mano»
+
+const FONDO = params.get('fondo');   // por defecto: transparente. ?fondo=papel → crema; ?fondo=191919 (hex sin #) → ese color
+if (FONDO === 'papel') document.body.style.background = COLORES.papel;
+if (FONDO && /^[0-9a-f]{3,8}$/i.test(FONDO)) document.body.style.background = '#' + FONDO;
+
+/* ---------- 2. UTILIDADES ---------- */
+const SVGNS = 'http://www.w3.org/2000/svg';
+const lienzo = document.getElementById('lienzo');
+const el = (tag, attrs, padre) => {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (padre) padre.appendChild(e);
+  return e;
+};
+
+/* ---------- 3. MONTAJE ---------- */
+const SIN_ANIMACION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const FIJO = params.get('t');          // ?t=3 congela la animación en el segundo 3 (para pruebas)
+let animaciones = [];
+let anchoMontado = -1;
+
+function montar() {
+  animaciones.forEach(a => a.cancel()); animaciones = [];
+  lienzo.innerHTML = '';
+  const W = lienzo.clientWidth, H = lienzo.clientHeight;
+  if (!W || !H) return;
+  anchoMontado = W;
+  lienzo.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
+  // Cuántas puntadas caben y dónde empieza la primera (la línea queda centrada)
+  const N = Math.max(1, Math.floor((W + SEP) / (LARGO + SEP)));
+  const x0 = (W - (N * LARGO + (N - 1) * SEP)) / 2;
+  const cy = H / 2;
+  const r = GROSOR / 2;
+
+  // Tiempos de cada puntada (ms). T = lo que tarda el hueco en recorrer toda la línea.
+  const T = Math.max(N, HUECO + 4) * RITMO;
+  const D = RITMO * 0.9;                 // lo que tarda en coserse una puntada
+  const E = RITMO * 0.9;                 // lo que tarda en descoserse
+  const Hh = HUECO * RITMO;              // tiempo que permanece descosida
+
+  // Trazo con extremos redondeados: para ocultarlo del todo hay que desplazar el patrón de guiones
+  // más allá del largo de la puntada más el radio de los extremos
+  const oculto = LARGO + 2 * r + 1;
+  const hueco  = LARGO + 4 * r + 2;      // espacio entre guiones, lo bastante grande para que nunca asome un punto
+
+  for (let i = 0; i < N; i++) {
+    const orden = IZQUIERDA ? N - 1 - i : i;               // orden en que se cose (0 = la primera)
+    const x = x0 + i * (LARGO + SEP);
+    const y = cy + ONDA * Math.sin(i * 1.1);               // pequeño vaivén para que parezca cosido a mano
+    const color = PALETA[orden % PALETA.length];
+    const p = el('path', {
+      d: `M${x.toFixed(1)},${y.toFixed(1)} L${(x + LARGO).toFixed(1)},${y.toFixed(1)}`,
+      fill: 'none', stroke: color, 'stroke-width': GROSOR, 'stroke-linecap': 'round'
+    }, lienzo);
+    const L = p.getTotalLength();
+    p.setAttribute('stroke-dasharray', `${L} ${hueco}`);
+    p.setAttribute('stroke-dashoffset', 0);
+    if (SIN_ANIMACION && FIJO === null) continue;          // sin movimiento: todas las puntadas cosidas
+
+    // Ciclo de una puntada: se cose (D), queda a la vista, se descose (E) y espera descosida (Hh).
+    // El retardo escalona las puntadas: cada una va una RITMO por detrás de la anterior.
+    const kf = [
+      { strokeDashoffset: oculto,  offset: 0 },
+      { strokeDashoffset: 0,       offset: D / T },
+      { strokeDashoffset: 0,       offset: (T - Hh - E) / T },
+      { strokeDashoffset: -oculto, offset: (T - Hh) / T },
+      { strokeDashoffset: -oculto, offset: 1 }
+    ];
+    const a = p.animate(kf, { duration: T, delay: orden * RITMO, iterations: Infinity, easing: 'linear', fill: 'backwards' });
+    if (FIJO !== null) { a.pause(); a.currentTime = parseFloat(FIJO) * 1000; }   // fotograma fijo para pruebas
+    animaciones.push(a);
+  }
+}
+
+montar();
+let temporizador;
+// Solo se vuelve a montar si cambia el ANCHO: en el móvil la barra del navegador cambia la altura al
+// hacer scroll y no queremos que la animación se reinicie por eso.
+window.addEventListener('resize', () => {
+  clearTimeout(temporizador);
+  temporizador = setTimeout(() => { if (lienzo.clientWidth !== anchoMontado) montar(); }, 200);
+});
+</script>
+</body>
+</html>
