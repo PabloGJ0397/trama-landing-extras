@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Trama · demo del calendario compartido</title>
+<style>
+  /* La demo es una «tarjeta» con su propio fondo crema (igual que la cabecera), así se ve igual en Notion claro y oscuro */
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  #app {
+    height: 100%; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px;
+    background: #F5F0E6; color: #1A1A1A; border-radius: 10px;
+    font-family: Georgia, 'Times New Roman', serif;
+  }
+  #cab { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; }
+  .tit { font-size: 16px; font-weight: 700; }
+  .sub { font-size: 12px; color: #6b6258; margin-left: 8px; font-weight: 400; }
+  .dur { display: flex; align-items: center; gap: 4px; font: 12px system-ui, sans-serif; color: #6b6258; }
+  .dur button {
+    font: inherit; color: #1A1A1A; background: #EDE4D0; border: 1px solid #d9cfb8;
+    border-radius: 99px; padding: 2px 9px; cursor: pointer;
+  }
+  .dur button.on { background: #1A1A1A; color: #F5F0E6; border-color: #1A1A1A; }
+
+  /* Calendario: cabecera de días + cuerpo con una columna por día */
+  #cal { flex: 1; min-height: 0; display: flex; flex-direction: column; background: #fffdf8;
+         border: 1px solid #d9cfb8; border-radius: 8px; overflow: hidden; }
+  .fila { display: grid; grid-template-columns: 30px repeat(7, 1fr); }
+  #dias { border-bottom: 1px solid #d9cfb8; padding: 4px 0; text-align: center;
+          font: 600 11px system-ui, sans-serif; color: #6b6258; }
+  #cuerpo { flex: 1; min-height: 0; }
+  #horas { position: relative; }
+  #horas span { position: absolute; right: 4px; margin-top: 1px; font: 9px system-ui, sans-serif; color: #9a9082; }
+  .col {
+    position: relative; border-left: 1px solid #e7dfcd; cursor: pointer;
+    /* una línea fina por cada hora */
+    background: linear-gradient(to bottom, transparent calc(100% - 1px), #eee6d3 0) 0 0 / 100% calc(100% / 12);
+  }
+  .col:hover { background-color: rgba(245, 240, 230, .6); }
+
+  /* Eventos de los colectivos: color de la paleta con borde de «puntadas» */
+  .ev {
+    position: absolute; left: 2px; right: 2px; border-radius: 5px; padding: 2px 4px; overflow: hidden;
+    font: 600 9.5px/1.15 system-ui, sans-serif; color: #1A1A1A;
+    background: #fffdf8; background: color-mix(in srgb, var(--k) 24%, #fffdf8);
+    outline: 1.5px dashed var(--k); outline-offset: -3px;
+  }
+  .ev.nuevo { animation: coser .9s ease-out both; }
+  .ev.choque { animation: pulso .9s ease-in-out infinite; }
+  .prop { pointer-events: none; z-index: 2; }
+  .prop.libre  { outline: 2px dashed #E0218A; outline-offset: -2px; background: rgba(224, 33, 138, .12); }
+  .prop.malo   { outline: 2px dashed #E63946; outline-offset: -2px;
+                 background: repeating-linear-gradient(45deg, rgba(230,57,70,.22) 0 6px, transparent 6px 12px); }
+  .prop b { display: block; }
+  @keyframes coser { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+  @keyframes pulso { 50% { box-shadow: 0 0 0 3px rgba(230, 57, 70, .55); } }
+  @media (prefers-reduced-motion: reduce) { .ev.nuevo, .ev.choque { animation: none; } }
+
+
+  /* Filtros: una fila de «chips» por temática y un selector de colectivo (se desplaza si no cabe) */
+  #filtros { display: flex; align-items: center; gap: 6px; overflow-x: auto; scrollbar-width: none; flex: none; }
+  #filtros::-webkit-scrollbar { display: none; }
+  #temas { display: flex; gap: 5px; flex: none; }
+  #filtros button, #filtros select {
+    font: 11.5px system-ui, sans-serif; color: #1A1A1A; background: #EDE4D0; border: 1px solid #d9cfb8;
+    border-radius: 99px; padding: 3px 10px; cursor: pointer; white-space: nowrap; flex: none;
+  }
+  #filtros button.on, #filtros select.on { background: #1A1A1A; color: #F5F0E6; border-color: #1A1A1A; }
+  .ev { transition: opacity .3s; }
+  .ev.apagado { opacity: .16; }
+  .ev.choque { opacity: 1; }
+
+  /* Zona de mensaje y botones */
+  #estado { min-height: 54px; display: flex; align-items: center; justify-content: space-between;
+            flex-wrap: wrap; gap: 6px 10px; font-size: 13px; line-height: 1.3; }
+  #msg { flex: 1 1 200px; }
+  #acc { display: flex; gap: 6px; }
+  #acc button { font: 600 12px system-ui, sans-serif; border-radius: 99px; padding: 6px 14px; cursor: pointer;
+                border: 1.5px solid #1A1A1A; background: transparent; color: #1A1A1A; }
+  #acc button.pri { background: #1A1A1A; color: #F5F0E6; }
+  @media (max-width: 480px) { .sub { display: none; } .ev { font-size: 8.5px; padding: 1px 2px; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="cab">
+    <div class="tit">Prueba Trama <span class="sub">Una semana de eventos de colectivos (de ejemplo)</span></div>
+    <div class="dur">Duración:
+      <button data-h="1">1 h</button><button data-h="2" class="on">2 h</button><button data-h="3">3 h</button>
+    </div>
+  </div>
+  <div id="filtros"><div id="temas"></div><select id="colec" aria-label="Filtrar por colectivo"></select></div>
+  <div id="cal">
+    <div id="dias" class="fila"><span></span></div>
+    <div id="cuerpo" class="fila"><div id="horas"></div></div>
+  </div>
+  <div id="estado"><div id="msg"></div><div id="acc"></div></div>
+</div>
+
+<script>
+/* =========================================================================
+   TRAMA · demo interactiva del calendario compartido.
+
+   Pulsas un hueco del calendario para proponer un evento. Trama comprueba si
+   choca con el de otro colectivo: si choca, te avisa y te busca un hueco libre;
+   si no, puedes publicarlo y se «cose» en la agenda.
+   Los colectivos y eventos son inventados, solo para la demo.
+
+   Parámetros de prueba por URL (opcionales): ?p=0,18 propone lunes a las 18:00; &pub=1 lo publica.
+   ========================================================================= */
+
+// PALETA: copia exacta del bloque COLORES de cabecera.html y del resto de archivos de Trama.
+// Para cambiar la paleta hay que cambiar los mismos valores en todos los archivos.
+const COLORES = {
+  morado:  '#7A3FC4', verde:   '#2E9E5B', naranja: '#F28C28', rojo:    '#E63946',
+  azul:    '#2B59C3', celeste: '#4FC3E8', fucsia:  '#E0218A', lima:    '#8BC53F',
+  mostaza: '#F5C518', turquesa:'#12A89D',
+  tinta:   '#1A1A1A', papel:   '#F5F0E6', boton:   '#EDE4D0', fondoTejido: '#241E2A'
+};
+
+const H0 = 10, H1 = 22, NH = H1 - H0;                      // el calendario va de 10:00 a 22:00
+const DIAS  = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+const DIASL = ['el lunes', 'el martes', 'el miércoles', 'el jueves', 'el viernes', 'el sábado', 'el domingo'];
+
+// Eventos de partida: d = día (0 = lunes), s = hora de inicio, e = hora de fin, k = color, c = colectivo
+const BASE = [
+  { d: 0, s: 18, e: 20, t: 'Asamblea vecinal',          c: 'Asociación Vecinal La Plaza', k: 'azul',     tema: 'Vecinal' },
+  { d: 1, s: 19, e: 21, t: 'Club de lectura feminista', c: 'Marea Violeta',               k: 'morado',   tema: 'Feminismo' },
+  { d: 2, s: 17, e: 19, t: 'Derechos laborales',        c: 'Sindicato del Barrio',        k: 'lima',     tema: 'Sindicalismo' },
+  { d: 2, s: 20, e: 22, t: 'Ensayo del coro',           c: 'Coro Voces del Barrio',       k: 'rojo',     tema: 'Cultura' },
+  { d: 3, s: 17, e: 19, t: 'Taller de autodefensa',     c: 'Marea Violeta',               k: 'morado',   tema: 'Feminismo' },
+  { d: 3, s: 19, e: 21, t: 'Cine fórum',                c: 'Cine Fórum Ateneo',           k: 'naranja',  tema: 'Cultura' },
+  { d: 4, s: 17, e: 19, t: 'Ruta en bici',              c: 'Colectivo Pedales',           k: 'celeste',  tema: 'Ecologismo' },
+  { d: 4, s: 19, e: 21, t: 'Asamblea sindical',         c: 'Sindicato del Barrio',        k: 'lima',     tema: 'Sindicalismo' },
+  { d: 5, s: 10, e: 13, t: 'Taller de compost',         c: 'Huerto Comunitario',          k: 'verde',    tema: 'Ecologismo' },
+  { d: 5, s: 17, e: 20, t: 'Mercadillo',                c: 'Mercadillo Solidario',        k: 'mostaza',  tema: 'Vecinal' },
+  { d: 6, s: 11, e: 14, t: 'Paella popular',            c: 'Peña La Trenza',              k: 'turquesa', tema: 'Vecinal' }
+];
+// Filtros: por temática o por colectivo (la zona queda fuera de esta demo)
+const TEMAS = ['Feminismo', 'Ecologismo', 'Sindicalismo', 'Cultura', 'Vecinal'];
+const COLECTIVOS = [...new Set(BASE.map(e => e.c))];
+let filtro = { tema: null, colectivo: null };
+
+let eventos = BASE.map(e => ({ ...e }));
+let dur = 2;                    // duración del evento que se propone (horas)
+let propuesta = null;           // { d, s } del evento que se está proponiendo
+let publicado = false;          // true justo después de publicar (para animar el evento nuevo)
+
+const $ = id => document.getElementById(id);
+const hh = h => h + ':00';
+
+/* ---------- Estructura fija: días, horas y columnas ---------- */
+DIAS.forEach(n => { const s = document.createElement('span'); s.textContent = n; $('dias').appendChild(s); });
+for (let h = H0; h < H1; h++) {
+  const s = document.createElement('span');
+  s.textContent = h; s.style.top = ((h - H0) / NH * 100) + '%';
+  $('horas').appendChild(s);
+}
+const cols = DIAS.map((_, d) => {
+  const c = document.createElement('div');
+  c.className = 'col'; c.dataset.d = d;
+  $('cuerpo').appendChild(c);
+  return c;
+});
+
+
+/* ---------- Filtros ---------- */
+const coincide = ev => ev.propio || ((!filtro.tema || ev.tema === filtro.tema) && (!filtro.colectivo || ev.c === filtro.colectivo));
+const chips = ['Todo', ...TEMAS].map(t => {
+  const b = document.createElement('button'); b.textContent = t;
+  b.onclick = () => { filtro = { tema: t === 'Todo' ? null : t, colectivo: null }; pintar(); };
+  $('temas').appendChild(b); return b;
+});
+const selCol = $('colec');
+selCol.innerHTML = '<option value="">Colectivo: todos</option>' + COLECTIVOS.map(c => `<option>${c}</option>`).join('');
+selCol.onchange = () => { filtro = { tema: null, colectivo: selCol.value || null }; pintar(); };
+function pintarFiltros() {
+  chips.forEach((b, i) => b.classList.toggle('on', i === 0 ? !filtro.tema && !filtro.colectivo : TEMAS[i - 1] === filtro.tema));
+  selCol.value = filtro.colectivo || ''; selCol.classList.toggle('on', !!filtro.colectivo);
+}
+
+/* ---------- Lógica ---------- */
+const choca = (d, s, e) => eventos.filter(x => x.d === d && s < x.e && e > x.s);
+
+// Hueco libre más cercano: primero el mismo día (lo más próximo a la hora pedida), luego los siguientes días
+function buscarHueco(d0, s0) {
+  const cand = [];
+  for (let k = 0; k < 7; k++) {
+    const d = (d0 + k) % 7;
+    for (let s = H0; s <= H1 - dur; s++) if (!choca(d, s, s + dur).length) cand.push({ d, s, k });
+  }
+  cand.sort((a, b) => a.k - b.k || Math.abs(a.s - s0) - Math.abs(b.s - s0));
+  return cand[0] || null;
+}
+
+function proponer(d, h) {
+  const s = Math.min(Math.max(h, H0), H1 - dur);
+  propuesta = { d, s };
+  publicado = false;
+  pintar();
+}
+
+function publicar() {
+  eventos.push({ d: propuesta.d, s: propuesta.s, e: propuesta.s + dur, t: 'Tu evento', c: 'Tu colectivo', k: 'fucsia', nuevo: true, propio: true });
+  propuesta = null; publicado = true;
+  pintar();
+}
+
+function reiniciar() { eventos = BASE.map(e => ({ ...e })); propuesta = null; publicado = false; pintar(); }
+
+/* ---------- Pintado ---------- */
+function bloque(clase, d, s, e, html, color) {
+  const div = document.createElement('div');
+  div.className = clase;
+  div.style.top = ((s - H0) / NH * 100) + '%';
+  div.style.height = ((e - s) / NH * 100) + '%';
+  if (color) div.style.setProperty('--k', color);
+  div.innerHTML = html;
+  cols[d].appendChild(div);
+  return div;
+}
+
+function pintar() {
+  cols.forEach(c => c.innerHTML = '');
+  const conflictos = propuesta ? choca(propuesta.d, propuesta.s, propuesta.s + dur) : [];
+
+  eventos.forEach(ev => {
+    const div = bloque('ev' + (ev.nuevo && publicado ? ' nuevo' : '') + (conflictos.includes(ev) ? ' choque' : '') + (coincide(ev) ? '' : ' apagado'),
+                       ev.d, ev.s, ev.e, ev.t, COLORES[ev.k]);
+    div.title = `${ev.t} · ${ev.c} · ${hh(ev.s)}–${hh(ev.e)}`;
+  });
+  if (propuesta) {
+    const { d, s } = propuesta;
+    bloque('ev prop ' + (conflictos.length ? 'malo' : 'libre'), d, s, s + dur, conflictos.length ? '' : `<b>Tu evento</b>${hh(s)}–${hh(s + dur)}`);
+  }
+
+  pintarFiltros();
+  // Mensaje y botones
+  const msg = $('msg'), acc = $('acc');
+  acc.innerHTML = '';
+  const boton = (txt, fn, pri) => {
+    const b = document.createElement('button'); b.textContent = txt; if (pri) b.className = 'pri';
+    b.onclick = fn; acc.appendChild(b);
+  };
+  if (propuesta && conflictos.length) {
+    const lista = conflictos.map(c => `«${c.t}» (${c.c}, ${hh(c.s)}–${hh(c.e)})`).join(' y ');
+    msg.innerHTML = `<b>Cuidado:</b> ${DIASL[propuesta.d]} de ${hh(propuesta.s)} a ${hh(propuesta.s + dur)} choca con ${lista}. Os pisaríais el público.`;
+    boton('Buscar hueco libre', () => { const h = buscarHueco(propuesta.d, propuesta.s); if (h) { propuesta = { d: h.d, s: h.s }; pintar(); } }, true);
+    boton('Cancelar', () => { propuesta = null; pintar(); });
+  } else if (propuesta) {
+    msg.innerHTML = `<b>Hueco libre</b> ${DIASL[propuesta.d]} de ${hh(propuesta.s)} a ${hh(propuesta.s + dur)}. Nadie más organiza nada a esa hora.`;
+    boton('Publicar en Trama', publicar, true);
+    boton('Cancelar', () => { propuesta = null; pintar(); });
+  } else if (publicado) {
+    msg.innerHTML = `<b>Hecho.</b> Tu evento ya está cosido en la agenda y los demás colectivos lo ven. Prueba a proponer otro encima y mira qué pasa.`;
+    boton('Reiniciar demo', reiniciar);
+  } else {
+    const activos = eventos.filter(e => !e.propio && coincide(e)).length;
+    msg.textContent = (filtro.tema || filtro.colectivo)
+      ? `${activos} ${activos === 1 ? 'evento' : 'eventos'} de «${filtro.tema || filtro.colectivo}» esta semana. Los demás se ven apagados, pero Trama también los tiene en cuenta para avisarte de choques.`
+      : 'Pulsa un hueco del calendario para proponer un evento.';
+    if (eventos.length > BASE.length) boton('Reiniciar demo', reiniciar);
+  }
+}
+
+/* ---------- Eventos de usuario ---------- */
+$('cuerpo').addEventListener('click', e => {
+  const col = e.target.closest('.col');
+  if (!col) return;
+  const r = col.getBoundingClientRect();
+  proponer(+col.dataset.d, H0 + Math.floor((e.clientY - r.top) / r.height * NH));   // la hora sale de dónde pulsas
+});
+document.querySelectorAll('.dur button').forEach(b => b.addEventListener('click', () => {
+  dur = +b.dataset.h;
+  document.querySelectorAll('.dur button').forEach(x => x.classList.toggle('on', x === b));
+  if (propuesta) proponer(propuesta.d, propuesta.s);
+}));
+
+/* ---------- Arranque (con atajo de prueba por URL) ---------- */
+pintar();
+const P = new URLSearchParams(location.search);
+if (P.get('f')) filtro = { tema: P.get('f'), colectivo: null };   // ?f=Ecologismo (prueba)
+if (P.get('c')) filtro = { tema: null, colectivo: P.get('c') };   // ?c=Marea%20Violeta (prueba)
+pintar();
+if (P.get('p')) {
+  const [d, h] = P.get('p').split(',').map(Number);
+  proponer(d, h);
+  if (P.get('pub') === '1' && !choca(propuesta.d, propuesta.s, propuesta.s + dur).length) publicar();
+}
+</script>
+</body>
+</html>
